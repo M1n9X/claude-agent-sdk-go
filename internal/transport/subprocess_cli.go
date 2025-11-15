@@ -512,14 +512,19 @@ func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 
 	case err := <-done:
 		// Process exited
+		// During normal shutdown, the subprocess may exit with non-zero codes
+		// which is expected behavior when stdin is closed, so we don't treat
+		// these as errors during the Close operation
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
-				return types.NewProcessErrorWithCode(
-					"subprocess exited with error",
-					exitErr.ExitCode(),
-				)
+				// Log the exit code for debugging but don't return it as an error
+				// since this is expected during normal shutdown
+				t.logger.Debug("CLI subprocess exited with code %d during shutdown (expected)", exitErr.ExitCode())
+				return nil
 			}
-			return types.NewProcessErrorWithCause("subprocess exited with error", err)
+			// For other types of errors, log but don't return as error during shutdown
+			t.logger.Debug("CLI subprocess error during shutdown: %v", err)
+			return nil
 		}
 		return nil
 	}
