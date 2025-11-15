@@ -78,6 +78,8 @@ This directory contains various examples demonstrating how to use the Claude Age
 - **Functionality**: Shows how to create an MCP server with a calculator tool that Claude can call.
 - **Run**: `cd examples/mcp/mcp_calculator && go run main.go`
 
+## Streaming Examples
+
 ### streaming_mode
 
 - **Functionality**: Demonstrates various patterns for building applications with the Claude SDK streaming interface:
@@ -86,17 +88,17 @@ This directory contains various examples demonstrating how to use the Claude Age
   - Concurrent send/receive
   - Interrupt handling
   - Custom options
-- **Run**: `cd examples/mcp/streaming_mode && go run main.go`
+- **Run**: `cd examples/streaming/streaming_mode && go run main.go`
 
 ### streaming_mode_comprehensive
 
 - **Functionality**: A more comprehensive example of streaming mode with additional patterns.
-- **Run**: `cd examples/mcp/streaming_mode_comprehensive && go run main.go`
+- **Run**: `cd examples/streaming/streaming_mode_comprehensive && go run main.go`
 
 ### streaming_mode_conversation
 
 - **Functionality**: Demonstrates streaming mode specifically for conversation-style interactions.
-- **Run**: `cd examples/mcp/streaming_mode_conversation && go run main.go`
+- **Run**: `cd examples/streaming/streaming_mode_conversation && go run main.go`
 
 ## Permissions Examples
 
