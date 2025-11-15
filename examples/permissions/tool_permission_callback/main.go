@@ -93,65 +93,140 @@ func myPermissionCallback(ctx context.Context, toolName string, input map[string
 	// Always allow read operations
 	if toolName == "Read" || toolName == "Glob" || toolName == "Grep" {
 		fmt.Printf("   ✅ Automatically allowing %s (read-only operation)\n", toolName)
-		return map[string]interface{}{
-			"permissionDecision": "allow",
+		return &types.PermissionResultAllow{
+			Behavior: "allow",
 		}, nil
 	}
 
-	// Deny write operations to system directories
+	// Handle write operations with user approval
 	if toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit" {
 		if filePath, ok := input["file_path"].(string); ok {
+			// Deny write operations to system directories
 			if strings.HasPrefix(filePath, "/etc/") || strings.HasPrefix(filePath, "/usr/") {
 				fmt.Printf("   ❌ Denying write to system directory: %s\n", filePath)
-				return map[string]interface{}{
-					"permissionDecision":       "deny",
-					"permissionDecisionReason": fmt.Sprintf("Cannot write to system directory: %s", filePath),
+				return &types.PermissionResultDeny{
+					Behavior:  "deny",
+					Message:   fmt.Sprintf("Cannot write to system directory: %s", filePath),
+					Interrupt: false,
 				}, nil
 			}
 
-			// Redirect writes to a safe directory
-			if !strings.HasPrefix(filePath, "/tmp/") && !strings.HasPrefix(filePath, "./") {
-				safePath := fmt.Sprintf("./safe_output/%s", filePath[strings.LastIndex(filePath, "/")+1:])
-				fmt.Printf("   ⚠️  Redirecting write from %s to %s\n", filePath, safePath)
-				// Create a copy of the input with the modified path
-				modifiedInput := make(map[string]interface{})
-				for k, v := range input {
-					modifiedInput[k] = v
+			// For other write operations, ask the user
+			fmt.Printf("   ❓ Write operation requested: %s\n", filePath)
+			fmt.Print("   Allow this write operation? (y/N): ")
+			reader := bufio.NewReader(os.Stdin)
+			userInput, _ := reader.ReadString('\n')
+			userInput = strings.TrimSpace(strings.ToLower(userInput))
+
+			if userInput == "y" || userInput == "yes" {
+				// Check if we need to redirect to safe directory
+				if !strings.HasPrefix(filePath, "/tmp/") && !strings.HasPrefix(filePath, "./") {
+					safePath := fmt.Sprintf("./safe_output/%s", filePath[strings.LastIndex(filePath, "/")+1:])
+					fmt.Printf("   ⚠️  Redirecting write from %s to %s\n", filePath, safePath)
+					// Create a copy of the input with the modified path
+					modifiedInput := make(map[string]interface{})
+					for k, v := range input {
+						modifiedInput[k] = v
+					}
+					modifiedInput["file_path"] = safePath
+					return &types.PermissionResultAllow{
+						Behavior:     "allow",
+						UpdatedInput: &modifiedInput,
+					}, nil
 				}
-				modifiedInput["file_path"] = safePath
-				return map[string]interface{}{
-					"permissionDecision": "allow",
-					"updatedInput":       modifiedInput,
+				// Otherwise, allow the write as-is
+				return &types.PermissionResultAllow{
+					Behavior: "allow",
+				}, nil
+			} else {
+				return &types.PermissionResultDeny{
+					Behavior:  "deny",
+					Message:   "User denied write permission",
+					Interrupt: false,
+				}, nil
+			}
+		} else {
+			// If no file_path, ask the user
+			fmt.Printf("   ❓ Write operation requested (no file path specified)\n")
+			fmt.Print("   Allow this write operation? (y/N): ")
+			reader := bufio.NewReader(os.Stdin)
+			userInput, _ := reader.ReadString('\n')
+			userInput = strings.TrimSpace(strings.ToLower(userInput))
+
+			if userInput == "y" || userInput == "yes" {
+				return &types.PermissionResultAllow{
+					Behavior: "allow",
+				}, nil
+			} else {
+				return &types.PermissionResultDeny{
+					Behavior:  "deny",
+					Message:   "User denied write permission",
+					Interrupt: false,
 				}, nil
 			}
 		}
 	}
 
-	// Check dangerous bash commands
+	// Handle bash commands with user approval
 	if toolName == "Bash" {
 		if command, ok := input["command"].(string); ok {
 			dangerousCommands := []string{"rm -rf", "sudo", "chmod 777", "dd if=", "mkfs"}
 
+			// Check for dangerous commands
 			for _, dangerous := range dangerousCommands {
 				if strings.Contains(command, dangerous) {
 					fmt.Printf("   ❌ Denying dangerous command: %s\n", command)
-					return map[string]interface{}{
-						"permissionDecision":       "deny",
-						"permissionDecisionReason": fmt.Sprintf("Dangerous command pattern detected: %s", dangerous),
+					return &types.PermissionResultDeny{
+						Behavior:  "deny",
+						Message:   fmt.Sprintf("Dangerous command pattern detected: %s", dangerous),
+						Interrupt: false,
 					}, nil
 				}
 			}
 
-			// Allow but log the command
-			fmt.Printf("   ✅ Allowing bash command: %s\n", command)
-			return map[string]interface{}{
-				"permissionDecision": "allow",
-			}, nil
+			// For all bash commands (even safe ones), ask the user
+			fmt.Printf("   ❓ Bash command requested: %s\n", command)
+			fmt.Print("   Allow this bash command? (y/N): ")
+			reader := bufio.NewReader(os.Stdin)
+			userInput, _ := reader.ReadString('\n')
+			userInput = strings.TrimSpace(strings.ToLower(userInput))
+
+			if userInput == "y" || userInput == "yes" {
+				fmt.Printf("   ✅ Allowing bash command: %s\n", command)
+				return &types.PermissionResultAllow{
+					Behavior: "allow",
+				}, nil
+			} else {
+				return &types.PermissionResultDeny{
+					Behavior:  "deny",
+					Message:   "User denied bash command permission",
+					Interrupt: false,
+				}, nil
+			}
+		} else {
+			// If no command specified, ask the user
+			fmt.Printf("   ❓ Bash command requested (no command specified)\n")
+			fmt.Print("   Allow this bash command? (y/N): ")
+			reader := bufio.NewReader(os.Stdin)
+			userInput, _ := reader.ReadString('\n')
+			userInput = strings.TrimSpace(strings.ToLower(userInput))
+
+			if userInput == "y" || userInput == "yes" {
+				return &types.PermissionResultAllow{
+					Behavior: "allow",
+				}, nil
+			} else {
+				return &types.PermissionResultDeny{
+					Behavior:  "deny",
+					Message:   "User denied bash command permission",
+					Interrupt: false,
+				}, nil
+			}
 		}
 	}
 
 	// For all other tools, ask the user
-	fmt.Printf("   ❓ Unknown tool: %s\n", toolName)
+	fmt.Printf("   ❓ Unknown/Other tool: %s\n", toolName)
 	fmt.Printf("      Input: %+v\n", input)
 
 	fmt.Print("   Allow this tool? (y/N): ")
@@ -160,13 +235,14 @@ func myPermissionCallback(ctx context.Context, toolName string, input map[string
 	userInput = strings.TrimSpace(strings.ToLower(userInput))
 
 	if userInput == "y" || userInput == "yes" {
-		return map[string]interface{}{
-			"permissionDecision": "allow",
+		return &types.PermissionResultAllow{
+			Behavior: "allow",
 		}, nil
 	} else {
-		return map[string]interface{}{
-			"permissionDecision":       "deny",
-			"permissionDecisionReason": "User denied permission",
+		return &types.PermissionResultDeny{
+			Behavior:  "deny",
+			Message:   "User denied permission",
+			Interrupt: false,
 		}, nil
 	}
 }
