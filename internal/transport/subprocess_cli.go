@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -563,6 +564,15 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context) {
 	// Open log file for stderr output
 	homeDir, _ := os.UserHomeDir()
 	logPath := fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
+
+	// Create the directory if it doesn't exist
+	logDir := filepath.Dir(logPath)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		// Fallback to stderr if directory can't be created
+		fmt.Fprintf(os.Stderr, "[SDK] Failed to create log directory: %v\n", err)
+		return
+	}
+
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		// Fallback to stderr if file can't be opened
