@@ -987,6 +987,29 @@ func flagValue(args []string, flag string) (string, bool) {
 	return "", false
 }
 
+// TestMaxBufferSizeDefault verifies the default max buffer size is applied.
+func TestMaxBufferSizeDefault(t *testing.T) {
+	opts := types.NewClaudeAgentOptions()
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	if transport.maxBufferSize != DefaultMaxBufferSize {
+		t.Fatalf("expected default maxBufferSize %d, got %d", DefaultMaxBufferSize, transport.maxBufferSize)
+	}
+}
+
+// TestMaxBufferSizeOverride verifies custom buffer size is used.
+func TestMaxBufferSizeOverride(t *testing.T) {
+	size := 2048
+	opts := types.NewClaudeAgentOptions().WithMaxBufferSize(size)
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	if transport.maxBufferSize != size {
+		t.Fatalf("expected maxBufferSize %d, got %d", size, transport.maxBufferSize)
+	}
+}
+
 // TestMCPServersStringPath ensures string-based MCP config paths are passed to the CLI.
 func TestMCPServersStringPath(t *testing.T) {
 	const configPath = "/tmp/mcp-config.json"

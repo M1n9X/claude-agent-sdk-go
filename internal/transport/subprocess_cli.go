@@ -28,6 +28,7 @@ type SubprocessCLITransport struct {
 	cwd             string
 	env             map[string]string
 	logger          *log.Logger
+	maxBufferSize   int
 	resumeSessionID string                    // Optional session ID to resume conversation
 	options         *types.ClaudeAgentOptions // Options for CLI configuration
 
@@ -68,11 +69,18 @@ func NewSubprocessCLITransport(cliPath, cwd string, env map[string]string, logge
 		capacity = *options.MessageChannelCapacity
 	}
 
+	// Determine buffer size for stdout reader
+	bufferSize := DefaultMaxBufferSize
+	if options != nil && options.MaxBufferSize != nil && *options.MaxBufferSize > 0 {
+		bufferSize = *options.MaxBufferSize
+	}
+
 	return &SubprocessCLITransport{
 		cliPath:         cliPath,
 		cwd:             cwd,
 		env:             env,
 		logger:          logger,
+		maxBufferSize:   bufferSize,
 		resumeSessionID: resumeSessionID,
 		options:         options,
 		messages:        make(chan types.Message, capacity), // Buffered channel for smooth streaming
@@ -188,7 +196,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context) {
 	defer close(t.messages)
 
 	t.logger.Debug("Message reader loop started")
-	reader := NewJSONLineReader(t.stdout)
+	reader := NewJSONLineReaderWithSize(t.stdout, t.maxBufferSize)
 
 	for {
 		// Check for context cancellation
