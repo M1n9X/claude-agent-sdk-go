@@ -746,6 +746,219 @@ func TestForkSessionFlag(t *testing.T) {
 	}
 }
 
+// TestBuildCommandArgs_DefaultsToEmptySystemPrompt ensures the CLI receives an explicit empty system prompt by default.
+func TestBuildCommandArgs_DefaultsToEmptySystemPrompt(t *testing.T) {
+	opts := types.NewClaudeAgentOptions()
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	args := transport.buildCommandArgs()
+
+	idx := findArg(args, "--system-prompt")
+	if idx == -1 {
+		t.Fatalf("--system-prompt flag not found in args: %v", args)
+	}
+	if idx+1 >= len(args) {
+		t.Fatalf("missing value for --system-prompt flag: %v", args)
+	}
+	if args[idx+1] != "" {
+		t.Fatalf("expected empty system prompt value, got %q", args[idx+1])
+	}
+}
+
+// TestBuildCommandArgs_SystemPromptPresetAppend ensures preset append prompts are passed correctly.
+func TestBuildCommandArgs_SystemPromptPresetAppend(t *testing.T) {
+	appendText := "append me"
+	preset := types.SystemPromptPreset{
+		Type:   "preset",
+		Preset: "claude_code",
+		Append: &appendText,
+	}
+
+	opts := types.NewClaudeAgentOptions().WithSystemPromptPreset(preset)
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	args := transport.buildCommandArgs()
+
+	if contains(args, "--system-prompt") {
+		t.Fatalf("unexpected --system-prompt flag when using preset append: %v", args)
+	}
+
+	idx := findArg(args, "--append-system-prompt")
+	if idx == -1 {
+		t.Fatalf("--append-system-prompt flag not found in args: %v", args)
+	}
+	if idx+1 >= len(args) {
+		t.Fatalf("missing value for --append-system-prompt flag: %v", args)
+	}
+	if args[idx+1] != appendText {
+		t.Fatalf("expected append text %q, got %q", appendText, args[idx+1])
+	}
+}
+
+// TestBuildCommandArgs_FallbackModel ensures fallback model flag is passed through.
+func TestBuildCommandArgs_FallbackModel(t *testing.T) {
+	fallback := "haiku"
+	opts := types.NewClaudeAgentOptions().WithFallbackModel(fallback)
+
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	args := transport.buildCommandArgs()
+
+	idx := findArg(args, "--fallback-model")
+	if idx == -1 {
+		t.Fatalf("--fallback-model flag not found in args: %v", args)
+	}
+	if idx+1 >= len(args) {
+		t.Fatalf("missing value for --fallback-model flag: %v", args)
+	}
+	if args[idx+1] != fallback {
+		t.Fatalf("expected fallback model %q, got %q", fallback, args[idx+1])
+	}
+}
+
+// TestBuildCommandArgs_ToolsAndLimits verifies tool, limit, and extra flags are passed.
+func TestBuildCommandArgs_ToolsAndLimits(t *testing.T) {
+	settings := "/tmp/settings.json"
+	addDirs := []string{"/tmp/a", "/tmp/b"}
+	sources := []types.SettingSource{types.SettingSourceUser, types.SettingSourceLocal}
+	customFlagValue := "value"
+
+	opts := types.NewClaudeAgentOptions().
+		WithAllowedTools("Bash", "Write").
+		WithDisallowedTools("Edit").
+		WithMaxTurns(5).
+		WithContinueConversation(true).
+		WithIncludePartialMessages(true).
+		WithSettings(settings).
+		WithAddDirs(addDirs...).
+		WithSettingSources(sources...).
+		WithExtraArg("custom-flag", &customFlagValue).
+		WithExtraArg("debug-to-stderr", nil)
+
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	args := transport.buildCommandArgs()
+
+	// Allowed tools
+	if val, ok := flagValue(args, "--allowedTools"); !ok || val != "Bash,Write" {
+		t.Fatalf("expected allowedTools flag with value %q, got %q (present=%v)", "Bash,Write", val, ok)
+	}
+
+	// Disallowed tools
+	if val, ok := flagValue(args, "--disallowedTools"); !ok || val != "Edit" {
+		t.Fatalf("expected disallowedTools flag with value %q, got %q (present=%v)", "Edit", val, ok)
+	}
+
+	// Max turns
+	if val, ok := flagValue(args, "--max-turns"); !ok || val != "5" {
+		t.Fatalf("expected max-turns flag with value %q, got %q (present=%v)", "5", val, ok)
+	}
+
+	// Continue conversation
+	if !contains(args, "--continue") {
+		t.Fatalf("expected --continue flag, args=%v", args)
+	}
+
+	// Include partial messages
+	if !contains(args, "--include-partial-messages") {
+		t.Fatalf("expected --include-partial-messages flag, args=%v", args)
+	}
+
+	// Settings path
+	if val, ok := flagValue(args, "--settings"); !ok || val != settings {
+		t.Fatalf("expected settings flag with value %q, got %q (present=%v)", settings, val, ok)
+	}
+
+	// Add directories
+	for _, dir := range addDirs {
+		if !containsFlagWithValue(args, "--add-dir", dir) {
+			t.Fatalf("expected --add-dir %s in args %v", dir, args)
+		}
+	}
+
+	// Setting sources
+	if val, ok := flagValue(args, "--setting-sources"); !ok || val != "user,local" {
+		t.Fatalf("expected setting-sources value %q, got %q (present=%v)", "user,local", val, ok)
+	}
+
+	// Extra args (bool + value)
+	if !contains(args, "--debug-to-stderr") {
+		t.Fatalf("expected --debug-to-stderr flag, args=%v", args)
+	}
+	if val, ok := flagValue(args, "--custom-flag"); !ok || val != customFlagValue {
+		t.Fatalf("expected custom-flag value %q, got %q (present=%v)", customFlagValue, val, ok)
+	}
+}
+
+// TestBuildCommandArgs_Plugins verifies plugin directories are passed to CLI.
+func TestBuildCommandArgs_Plugins(t *testing.T) {
+	pluginPath := "/tmp/plugin"
+	opts := types.NewClaudeAgentOptions().WithLocalPlugin(pluginPath)
+
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	args := transport.buildCommandArgs()
+
+	if !containsFlagWithValue(args, "--plugin-dir", pluginPath) {
+		t.Fatalf("expected --plugin-dir %s in args %v", pluginPath, args)
+	}
+}
+
+// TestBuildCommandArgs_Agents verifies agent definitions are serialized for CLI.
+func TestBuildCommandArgs_Agents(t *testing.T) {
+	model := "sonnet"
+	agents := map[string]types.AgentDefinition{
+		"code-reviewer": {
+			Description: "Review code",
+			Prompt:      "You are a reviewer",
+			Tools:       []string{"Read"},
+			Model:       &model,
+		},
+	}
+
+	opts := types.NewClaudeAgentOptions().WithAgents(agents)
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	args := transport.buildCommandArgs()
+
+	val, ok := flagValue(args, "--agents")
+	if !ok {
+		t.Fatalf("--agents flag not found in args %v", args)
+	}
+
+	var payload map[string]map[string]interface{}
+	if err := json.Unmarshal([]byte(val), &payload); err != nil {
+		t.Fatalf("failed to unmarshal agents payload: %v", err)
+	}
+
+	cfg, exists := payload["code-reviewer"]
+	if !exists {
+		t.Fatalf("agent 'code-reviewer' not found in payload %v", payload)
+	}
+	if cfg["description"] != "Review code" || cfg["prompt"] != "You are a reviewer" {
+		t.Fatalf("unexpected agent config: %v", cfg)
+	}
+	if cfg["model"] != model {
+		t.Fatalf("expected model %q, got %v", model, cfg["model"])
+	}
+}
+
+// findArg returns the index of the target flag or -1 if not present.
+func findArg(args []string, target string) int {
+	for i, arg := range args {
+		if arg == target {
+			return i
+		}
+	}
+	return -1
+}
+
 // contains checks if a slice contains a string
 func contains(slice []string, str string) bool {
 	for _, s := range slice {
@@ -754,6 +967,24 @@ func contains(slice []string, str string) bool {
 		}
 	}
 	return false
+}
+
+// containsFlagWithValue checks for a flag immediately followed by a value.
+func containsFlagWithValue(args []string, flag, value string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+// flagValue returns the value following a flag, if present.
+func flagValue(args []string, flag string) (string, bool) {
+	if idx := findArg(args, flag); idx != -1 && idx+1 < len(args) {
+		return args[idx+1], true
+	}
+	return "", false
 }
 
 // TestMCPServersStringPath ensures string-based MCP config paths are passed to the CLI.

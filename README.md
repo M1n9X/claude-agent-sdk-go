@@ -80,12 +80,15 @@ The SDK provides extensive configuration through `ClaudeAgentOptions`:
 ```go
 opts := types.NewClaudeAgentOptions().
     WithModel("claude-sonnet-4-5-20250929").
+    WithFallbackModel("claude-3-5-haiku-latest").
     WithAllowedTools("Bash", "Write", "Read").
     WithPermissionMode(types.PermissionModeAcceptEdits).
     WithMaxBudgetUSD(1.0).
     WithSystemPromptString("You are a helpful coding assistant.").
     WithCWD("/path/to/working/directory")
 ```
+
+By default the Go SDK sends an empty system prompt to the Claude CLI, matching the Python SDK behavior. Use `WithSystemPromptPreset(types.SystemPromptPreset{Type: "preset", Preset: "claude_code"})` to opt into the Claude Code preset (optionally setting `Append` to add extra guidance), or `WithSystemPromptString` to supply your own instructions.
 
 ### Agent Definitions
 

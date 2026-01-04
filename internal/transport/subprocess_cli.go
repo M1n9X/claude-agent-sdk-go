@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -285,31 +286,53 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		"--verbose",
 	}
 
+	opts := t.options
+
 	// Add permission prompt tool if specified
-	if t.options != nil && t.options.PermissionPromptToolName != nil {
-		args = append(args, "--permission-prompt-tool", *t.options.PermissionPromptToolName)
-		t.logger.Debug("Setting permission prompt tool: %s", *t.options.PermissionPromptToolName)
+	if opts != nil && opts.PermissionPromptToolName != nil {
+		args = append(args, "--permission-prompt-tool", *opts.PermissionPromptToolName)
+		t.logger.Debug("Setting permission prompt tool: %s", *opts.PermissionPromptToolName)
 	}
 
 	// Add permission mode if specified
-	if t.options != nil && t.options.PermissionMode != nil {
-		args = append(args, "--permission-mode", string(*t.options.PermissionMode))
-		t.logger.Debug("Setting permission mode: %s", string(*t.options.PermissionMode))
+	if opts != nil && opts.PermissionMode != nil {
+		args = append(args, "--permission-mode", string(*opts.PermissionMode))
+		t.logger.Debug("Setting permission mode: %s", string(*opts.PermissionMode))
 	}
 
-	// Add system prompt if specified
-	if t.options != nil && t.options.SystemPrompt != nil {
-		// SystemPrompt can be either a string or a preset
-		if promptStr, ok := t.options.SystemPrompt.(string); ok {
-			args = append(args, "--system-prompt", promptStr)
-			t.logger.Debug("Setting system prompt: %s", promptStr)
+	// Configure system prompt
+	// By default, use an empty system prompt to avoid implicit presets from the CLI.
+	if opts == nil || opts.SystemPrompt == nil {
+		args = append(args, "--system-prompt", "")
+		t.logger.Debug("Using empty system prompt (no preset)")
+	} else {
+		switch prompt := opts.SystemPrompt.(type) {
+		case string:
+			args = append(args, "--system-prompt", prompt)
+			t.logger.Debug("Setting system prompt: %s", prompt)
+		case types.SystemPromptPreset:
+			if prompt.Type == "preset" && prompt.Append != nil {
+				args = append(args, "--append-system-prompt", *prompt.Append)
+				t.logger.Debug("Appending to preset system prompt")
+			}
+		case *types.SystemPromptPreset:
+			if prompt != nil && prompt.Type == "preset" && prompt.Append != nil {
+				args = append(args, "--append-system-prompt", *prompt.Append)
+				t.logger.Debug("Appending to preset system prompt")
+			}
 		}
 	}
 
 	// Add model if specified
-	if t.options != nil && t.options.Model != nil {
-		args = append(args, "--model", *t.options.Model)
-		t.logger.Debug("Setting model: %s", *t.options.Model)
+	if opts != nil && opts.Model != nil {
+		args = append(args, "--model", *opts.Model)
+		t.logger.Debug("Setting model: %s", *opts.Model)
+	}
+
+	// Add fallback model if specified
+	if opts != nil && opts.FallbackModel != nil {
+		args = append(args, "--fallback-model", *opts.FallbackModel)
+		t.logger.Debug("Setting fallback model: %s", *opts.FallbackModel)
 	}
 
 	// Add --resume flag if resuming a conversation
@@ -325,23 +348,45 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	}
 
 	// Add permission bypass flags if enabled
-	if t.options != nil {
+	if opts != nil {
 		// Must set allow flag first (acts as safety switch)
-		if t.options.AllowDangerouslySkipPermissions {
+		if opts.AllowDangerouslySkipPermissions {
 			args = append(args, "--allow-dangerously-skip-permissions")
 			t.logger.Debug("Allowing permission bypass (safety switch enabled)")
 
 			// Only add skip flag if allow flag is also set
-			if t.options.DangerouslySkipPermissions {
+			if opts.DangerouslySkipPermissions {
 				args = append(args, "--dangerously-skip-permissions")
 				t.logger.Debug("DANGER: Bypassing all permissions - use only in sandboxed environments!")
 			}
 		}
 	}
 
+	// Allowed and disallowed tools
+	if opts != nil && len(opts.AllowedTools) > 0 {
+		args = append(args, "--allowedTools", strings.Join(opts.AllowedTools, ","))
+		t.logger.Debug("Setting allowed tools: %v", opts.AllowedTools)
+	}
+
+	if opts != nil && len(opts.DisallowedTools) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(opts.DisallowedTools, ","))
+		t.logger.Debug("Setting disallowed tools: %v", opts.DisallowedTools)
+	}
+
+	// Conversation controls
+	if opts != nil && opts.ContinueConversation {
+		args = append(args, "--continue")
+		t.logger.Debug("Continuing previous conversation")
+	}
+
+	if opts != nil && opts.MaxTurns != nil {
+		args = append(args, "--max-turns", strconv.Itoa(*opts.MaxTurns))
+		t.logger.Debug("Setting max turns: %d", *opts.MaxTurns)
+	}
+
 	// Add MCP servers configuration
-	if t.options != nil && t.options.McpServers != nil {
-		switch servers := t.options.McpServers.(type) {
+	if opts != nil && opts.McpServers != nil {
+		switch servers := opts.McpServers.(type) {
 		case map[string]interface{}:
 			if len(servers) > 0 {
 				if configFile := t.generateMcpConfigFile(); configFile != "" {
@@ -363,15 +408,97 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	}
 
 	// Add extended thinking token limit if specified
-	if t.options != nil && t.options.MaxThinkingTokens != nil {
-		args = append(args, "--max-thinking-tokens", fmt.Sprintf("%d", *t.options.MaxThinkingTokens))
-		t.logger.Debug("Setting max thinking tokens: %d", *t.options.MaxThinkingTokens)
+	if opts != nil && opts.MaxThinkingTokens != nil {
+		args = append(args, "--max-thinking-tokens", fmt.Sprintf("%d", *opts.MaxThinkingTokens))
+		t.logger.Debug("Setting max thinking tokens: %d", *opts.MaxThinkingTokens)
 	}
 
 	// Add budget limit if specified
-	if t.options != nil && t.options.MaxBudgetUSD != nil {
-		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", *t.options.MaxBudgetUSD))
-		t.logger.Debug("Setting max budget: $%.2f USD", *t.options.MaxBudgetUSD)
+	if opts != nil && opts.MaxBudgetUSD != nil {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", *opts.MaxBudgetUSD))
+		t.logger.Debug("Setting max budget: $%.2f USD", *opts.MaxBudgetUSD)
+	}
+
+	// Settings and directories
+	if opts != nil && opts.Settings != nil {
+		args = append(args, "--settings", *opts.Settings)
+		t.logger.Debug("Setting settings path: %s", *opts.Settings)
+	}
+
+	if opts != nil && len(opts.AddDirs) > 0 {
+		for _, dir := range opts.AddDirs {
+			args = append(args, "--add-dir", dir)
+			t.logger.Debug("Adding directory: %s", dir)
+		}
+	}
+
+	if opts != nil && opts.SettingSources != nil {
+		sources := make([]string, len(opts.SettingSources))
+		for i, s := range opts.SettingSources {
+			sources[i] = string(s)
+		}
+		sourcesValue := strings.Join(sources, ",")
+		args = append(args, "--setting-sources", sourcesValue)
+		t.logger.Debug("Setting sources: %s", sourcesValue)
+	}
+
+	// Include partial messages
+	if opts != nil && opts.IncludePartialMessages {
+		args = append(args, "--include-partial-messages")
+		t.logger.Debug("Including partial messages")
+	}
+
+	// Agent definitions
+	if opts != nil && len(opts.Agents) > 0 {
+		agentsPayload := make(map[string]map[string]interface{}, len(opts.Agents))
+		for name, agent := range opts.Agents {
+			agentConfig := map[string]interface{}{
+				"description": agent.Description,
+				"prompt":      agent.Prompt,
+			}
+			if len(agent.Tools) > 0 {
+				agentConfig["tools"] = agent.Tools
+			}
+			if agent.Model != nil {
+				agentConfig["model"] = *agent.Model
+			}
+			agentsPayload[name] = agentConfig
+		}
+
+		if data, err := json.Marshal(agentsPayload); err == nil {
+			args = append(args, "--agents", string(data))
+			t.logger.Debug("Setting agents configuration")
+		} else {
+			t.logger.Warning("Failed to marshal agents configuration: %v", err)
+		}
+	}
+
+	// Plugins
+	if opts != nil && len(opts.Plugins) > 0 {
+		for _, plugin := range opts.Plugins {
+			pluginType := plugin.Type
+			if pluginType == "" {
+				pluginType = "local"
+			}
+			switch pluginType {
+			case "local":
+				args = append(args, "--plugin-dir", plugin.Path)
+				t.logger.Debug("Adding plugin directory: %s", plugin.Path)
+			default:
+				t.logger.Warning("Unsupported plugin type %q, skipping", pluginType)
+			}
+		}
+	}
+
+	// Extra args
+	if opts != nil && len(opts.ExtraArgs) > 0 {
+		for flag, value := range opts.ExtraArgs {
+			if value == nil {
+				args = append(args, fmt.Sprintf("--%s", flag))
+			} else {
+				args = append(args, fmt.Sprintf("--%s", flag), *value)
+			}
+		}
 	}
 
 	return args
