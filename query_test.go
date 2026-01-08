@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -108,6 +109,9 @@ func TestQuery_WithOptions(t *testing.T) {
 func TestQuery_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("CLAUDE_SDK_RUN_INTEGRATION") != "1" {
+		t.Skip("Set CLAUDE_SDK_RUN_INTEGRATION=1 to run integration tests")
 	}
 
 	// Check if CLAUDE_API_KEY is set

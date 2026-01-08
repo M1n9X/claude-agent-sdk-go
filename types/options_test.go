@@ -127,3 +127,50 @@ func TestWithMaxBudgetUSDZeroValue(t *testing.T) {
 		t.Errorf("Expected MaxBudgetUSD to be 0.0, got %.2f", *opts.MaxBudgetUSD)
 	}
 }
+
+// TestWithTools validates base tools configuration.
+func TestWithTools(t *testing.T) {
+	opts := NewClaudeAgentOptions().WithTools("Read", "Write")
+
+	tools, ok := opts.Tools.([]string)
+	if !ok {
+		t.Fatalf("expected Tools to be []string, got %T", opts.Tools)
+	}
+
+	if len(tools) != 2 || tools[0] != "Read" || tools[1] != "Write" {
+		t.Fatalf("unexpected tools slice: %v", tools)
+	}
+}
+
+// TestWithBetas validates beta headers configuration.
+func TestWithBetas(t *testing.T) {
+	opts := NewClaudeAgentOptions().WithBetas(SdkBetaContext1M)
+
+	if len(opts.Betas) != 1 || opts.Betas[0] != SdkBetaContext1M {
+		t.Fatalf("expected betas to contain %s, got %v", SdkBetaContext1M, opts.Betas)
+	}
+}
+
+// TestWithJSONSchemaOutput validates structured output helper.
+func TestWithJSONSchemaOutput(t *testing.T) {
+	schema := map[string]interface{}{
+		"type": "object",
+	}
+
+	opts := NewClaudeAgentOptions().WithJSONSchemaOutput(schema)
+	if opts.OutputFormat == nil {
+		t.Fatalf("expected OutputFormat to be set")
+	}
+
+	if opts.OutputFormat["type"] != "json_schema" {
+		t.Fatalf("expected type to be json_schema, got %v", opts.OutputFormat["type"])
+	}
+}
+
+// TestWithEnableFileCheckpointing toggles the flag.
+func TestWithEnableFileCheckpointing(t *testing.T) {
+	opts := NewClaudeAgentOptions().WithEnableFileCheckpointing(true)
+	if !opts.EnableFileCheckpointing {
+		t.Fatalf("expected EnableFileCheckpointing to be true")
+	}
+}

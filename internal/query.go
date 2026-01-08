@@ -606,6 +606,11 @@ func (q *Query) sendControlRequest(ctx context.Context, request map[string]inter
 	}
 }
 
+// SendControlRequest exposes control requests to callers (streaming mode only).
+func (q *Query) SendControlRequest(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+	return q.sendControlRequest(ctx, request)
+}
+
 // sendSuccessResponse sends a success control response.
 func (q *Query) sendSuccessResponse(requestID string, response map[string]interface{}) {
 	controlResponse := map[string]interface{}{

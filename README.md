@@ -90,6 +90,63 @@ opts := types.NewClaudeAgentOptions().
 
 By default the Go SDK sends an empty system prompt to the Claude CLI, matching the Python SDK behavior. Use `WithSystemPromptPreset(types.SystemPromptPreset{Type: "preset", Preset: "claude_code"})` to opt into the Claude Code preset (optionally setting `Append` to add extra guidance), or `WithSystemPromptString` to supply your own instructions.
 
+### Structured Outputs
+
+Request validated JSON that matches your schema using `WithJSONSchemaOutput`. The parsed payload is available on `ResultMessage.StructuredOutput`.
+
+```go
+schema := map[string]interface{}{
+    "type": "object",
+    "properties": map[string]interface{}{
+        "answer": map[string]interface{}{"type": "string"},
+    },
+    "required": []interface{}{"answer"},
+}
+
+opts := types.NewClaudeAgentOptions().
+    WithJSONSchemaOutput(schema)
+
+for msg := range claude.Query(ctx, "Return the answer as JSON", opts) {
+    if res, ok := msg.(*types.ResultMessage); ok {
+        fmt.Printf("Structured output: %#v\n", res.StructuredOutput)
+    }
+}
+```
+
+### File Checkpointing & Rewind
+
+Enable checkpointing to roll back filesystem changes to any user message UUID.
+
+```go
+opts := types.NewClaudeAgentOptions().
+    WithEnableFileCheckpointing(true)
+
+client, _ := claude.NewClient(ctx, opts)
+defer client.Close(ctx)
+_ = client.Connect(ctx)
+_ = client.Query(ctx, "Modify files safely")
+
+var checkpoint string
+for msg := range client.ReceiveResponse(ctx) {
+    if user, ok := msg.(*types.UserMessage); ok && user.UUID != nil {
+        checkpoint = *user.UUID
+    }
+}
+
+// Rewind to the captured checkpoint
+_ = client.RewindFiles(ctx, checkpoint)
+```
+
+### Base Tools & Betas
+
+Control the default toolset or disable built-ins entirely:
+
+```go
+opts := types.NewClaudeAgentOptions().
+    WithTools("Read", "Edit").           // or WithToolsPreset(types.ToolsPreset{Type: "preset", Preset: "claude_code"})
+    WithBetas(types.SdkBetaContext1M)    // enable extended-context beta
+```
+
 ### Agent Definitions
 
 Create custom agents with specific capabilities:

@@ -570,3 +570,26 @@ func (c *Client) Interrupt(ctx context.Context) error {
 
 	return nil
 }
+
+// RewindFiles rewinds tracked files to the state at the specified user message UUID.
+// Requires streaming mode connection and EnableFileCheckpointing option set when connecting.
+func (c *Client) RewindFiles(ctx context.Context, userMessageID string) error {
+	if userMessageID == "" {
+		return fmt.Errorf("userMessageID cannot be empty")
+	}
+
+	c.mu.Lock()
+	connected := c.connected
+	query := c.query
+	c.mu.Unlock()
+
+	if !connected || query == nil {
+		return types.NewCLIConnectionError("not connected - call Connect() first")
+	}
+
+	_, err := query.SendControlRequest(ctx, map[string]interface{}{
+		"subtype":         "rewind_files",
+		"user_message_id": userMessageID,
+	})
+	return err
+}

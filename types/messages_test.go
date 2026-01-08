@@ -167,6 +167,7 @@ func TestUserMessageMarshaling(t *testing.T) {
 		// Standard format with content at top level
 		jsonData := `{
 			"type": "user",
+			"uuid": "user-uuid-123",
 			"content": [
 				{
 					"type": "text",
@@ -188,7 +189,36 @@ func TestUserMessageMarshaling(t *testing.T) {
 		if len(blocks) != 1 {
 			t.Fatalf("expected 1 content block, got %d", len(blocks))
 		}
+
+		if decoded.UUID == nil || *decoded.UUID != "user-uuid-123" {
+			t.Fatalf("expected uuid to be parsed, got %v", decoded.UUID)
+		}
 	})
+}
+
+// TestAssistantMessageErrorParsing verifies assistant error codes are parsed.
+func TestAssistantMessageErrorParsing(t *testing.T) {
+	jsonData := `{
+		"type": "assistant",
+		"message": {
+			"content": [{"type":"text","text":"oops"}],
+			"model": "claude-3",
+			"error": "rate_limit"
+		}
+	}`
+
+	var msg AssistantMessage
+	if err := json.Unmarshal([]byte(jsonData), &msg); err != nil {
+		t.Fatalf("failed to unmarshal assistant message: %v", err)
+	}
+
+	if msg.Error == nil {
+		t.Fatalf("expected error field to be set")
+	}
+
+	if *msg.Error != AssistantMessageErrorRateLimit {
+		t.Fatalf("expected error %q, got %q", AssistantMessageErrorRateLimit, *msg.Error)
+	}
 }
 
 // TestResultMessageMarshaling tests JSON marshaling/unmarshaling of ResultMessage.
@@ -205,6 +235,9 @@ func TestResultMessageMarshaling(t *testing.T) {
 		SessionID:     "session-123",
 		TotalCostUSD:  &costUSD,
 		Result:        &result,
+		StructuredOutput: map[string]interface{}{
+			"answer": "42",
+		},
 	}
 
 	data, err := json.Marshal(original)
@@ -222,5 +255,9 @@ func TestResultMessageMarshaling(t *testing.T) {
 	}
 	if decoded.TotalCostUSD == nil || *decoded.TotalCostUSD != *original.TotalCostUSD {
 		t.Errorf("total cost doesn't match")
+	}
+
+	if decoded.StructuredOutput == nil {
+		t.Fatalf("structured_output should be preserved")
 	}
 }

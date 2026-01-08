@@ -299,6 +299,9 @@ func TestClient_MultipleQueries(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	if os.Getenv("CLAUDE_SDK_RUN_INTEGRATION") != "1" {
+		t.Skip("Set CLAUDE_SDK_RUN_INTEGRATION=1 to run integration tests")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

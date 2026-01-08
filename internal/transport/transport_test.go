@@ -518,6 +518,9 @@ func TestIntegrationSubprocessCLI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	if os.Getenv("CLAUDE_SDK_RUN_INTEGRATION") != "1" {
+		t.Skip("Set CLAUDE_SDK_RUN_INTEGRATION=1 to run integration tests")
+	}
 
 	// Try to find Claude CLI
 	cliPath, err := FindCLI()
@@ -819,6 +822,21 @@ func TestBuildCommandArgs_FallbackModel(t *testing.T) {
 	}
 }
 
+// TestBuildCommandArgs_ToolsPreset ensures tools presets are passed through to the CLI.
+func TestBuildCommandArgs_ToolsPreset(t *testing.T) {
+	preset := types.ToolsPreset{Type: "preset", Preset: "claude_code"}
+
+	opts := types.NewClaudeAgentOptions().WithToolsPreset(preset)
+	logger := log.NewLogger(false)
+	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
+
+	args := transport.buildCommandArgs()
+
+	if val, ok := flagValue(args, "--tools"); !ok || val != preset.Preset {
+		t.Fatalf("expected tools preset value %q, got %q (present=%v)", preset.Preset, val, ok)
+	}
+}
+
 // TestBuildCommandArgs_ToolsAndLimits verifies tool, limit, and extra flags are passed.
 func TestBuildCommandArgs_ToolsAndLimits(t *testing.T) {
 	settings := "/tmp/settings.json"
@@ -827,6 +845,7 @@ func TestBuildCommandArgs_ToolsAndLimits(t *testing.T) {
 	customFlagValue := "value"
 
 	opts := types.NewClaudeAgentOptions().
+		WithTools("Read", "Write").
 		WithAllowedTools("Bash", "Write").
 		WithDisallowedTools("Edit").
 		WithMaxTurns(5).
@@ -835,6 +854,13 @@ func TestBuildCommandArgs_ToolsAndLimits(t *testing.T) {
 		WithSettings(settings).
 		WithAddDirs(addDirs...).
 		WithSettingSources(sources...).
+		WithBetas(types.SdkBetaContext1M).
+		WithJSONSchemaOutput(map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"foo": map[string]interface{}{"type": "string"},
+			},
+		}).
 		WithExtraArg("custom-flag", &customFlagValue).
 		WithExtraArg("debug-to-stderr", nil)
 
@@ -842,6 +868,11 @@ func TestBuildCommandArgs_ToolsAndLimits(t *testing.T) {
 	transport := NewSubprocessCLITransport("/bin/echo", "", nil, logger, "", opts)
 
 	args := transport.buildCommandArgs()
+
+	// Tools
+	if val, ok := flagValue(args, "--tools"); !ok || val != "Read,Write" {
+		t.Fatalf("expected tools flag with value %q, got %q (present=%v)", "Read,Write", val, ok)
+	}
 
 	// Allowed tools
 	if val, ok := flagValue(args, "--allowedTools"); !ok || val != "Bash,Write" {
@@ -866,6 +897,16 @@ func TestBuildCommandArgs_ToolsAndLimits(t *testing.T) {
 	// Include partial messages
 	if !contains(args, "--include-partial-messages") {
 		t.Fatalf("expected --include-partial-messages flag, args=%v", args)
+	}
+
+	// Betas
+	if val, ok := flagValue(args, "--betas"); !ok || val != string(types.SdkBetaContext1M) {
+		t.Fatalf("expected betas flag with value %q, got %q (present=%v)", types.SdkBetaContext1M, val, ok)
+	}
+
+	// JSON schema
+	if val, ok := flagValue(args, "--json-schema"); !ok || !strings.Contains(val, "\"foo\"") {
+		t.Fatalf("expected json-schema flag containing foo property, got %q (present=%v)", val, ok)
 	}
 
 	// Settings path

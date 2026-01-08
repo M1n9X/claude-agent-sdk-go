@@ -18,7 +18,7 @@ import (
 
 const (
 	// SDKVersion is the version identifier for this SDK
-	SDKVersion = "0.1.0"
+	SDKVersion = "0.1.19"
 )
 
 // SubprocessCLITransport implements Transport using a Claude Code CLI subprocess.
@@ -146,6 +146,12 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	for key, value := range t.env {
 		t.cmd.Env = append(t.cmd.Env, fmt.Sprintf("%s=%s", key, value))
 		t.logger.Debug("Setting custom environment variable: %s=%s", key, value)
+	}
+
+	// Enable file checkpointing support when requested
+	if t.options != nil && t.options.EnableFileCheckpointing {
+		t.cmd.Env = append(t.cmd.Env, "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true")
+		t.logger.Debug("Enabling file checkpointing via CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING")
 	}
 
 	// Set up pipes
@@ -331,6 +337,32 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		}
 	}
 
+	// Handle tools option (base tool set)
+	if opts != nil && opts.Tools != nil {
+		switch tools := opts.Tools.(type) {
+		case []string:
+			if len(tools) == 0 {
+				args = append(args, "--tools", "")
+				t.logger.Debug("Disabling all built-in tools via --tools \"\"")
+			} else {
+				args = append(args, "--tools", strings.Join(tools, ","))
+				t.logger.Debug("Setting base tools: %v", tools)
+			}
+		case types.ToolsPreset:
+			if tools.Type == "preset" {
+				args = append(args, "--tools", tools.Preset)
+				t.logger.Debug("Using tools preset: %s", tools.Preset)
+			}
+		case *types.ToolsPreset:
+			if tools != nil && tools.Type == "preset" {
+				args = append(args, "--tools", tools.Preset)
+				t.logger.Debug("Using tools preset: %s", tools.Preset)
+			}
+		default:
+			t.logger.Warning("Unsupported tools option type %T; skipping tools flag", tools)
+		}
+	}
+
 	// Add model if specified
 	if opts != nil && opts.Model != nil {
 		args = append(args, "--model", *opts.Model)
@@ -341,6 +373,16 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	if opts != nil && opts.FallbackModel != nil {
 		args = append(args, "--fallback-model", *opts.FallbackModel)
 		t.logger.Debug("Setting fallback model: %s", *opts.FallbackModel)
+	}
+
+	// Add betas if specified
+	if opts != nil && len(opts.Betas) > 0 {
+		betas := make([]string, len(opts.Betas))
+		for i, beta := range opts.Betas {
+			betas[i] = string(beta)
+		}
+		args = append(args, "--betas", strings.Join(betas, ","))
+		t.logger.Debug("Enabling beta headers: %v", betas)
 	}
 
 	// Add --resume flag if resuming a conversation
@@ -419,6 +461,20 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	if opts != nil && opts.MaxThinkingTokens != nil {
 		args = append(args, "--max-thinking-tokens", fmt.Sprintf("%d", *opts.MaxThinkingTokens))
 		t.logger.Debug("Setting max thinking tokens: %d", *opts.MaxThinkingTokens)
+	}
+
+	// Add structured output schema if provided
+	if opts != nil && opts.OutputFormat != nil {
+		if formatType, ok := opts.OutputFormat["type"].(string); ok && formatType == "json_schema" {
+			if schema, ok := opts.OutputFormat["schema"]; ok {
+				if data, err := json.Marshal(schema); err == nil {
+					args = append(args, "--json-schema", string(data))
+					t.logger.Debug("Setting JSON schema for structured output")
+				} else {
+					t.logger.Warning("Failed to marshal JSON schema: %v", err)
+				}
+			}
+		}
 	}
 
 	// Add budget limit if specified

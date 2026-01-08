@@ -13,11 +13,25 @@ const (
 	SettingSourceLocal   SettingSource = "local"
 )
 
+// SdkBeta represents supported Anthropic API beta headers.
+type SdkBeta string
+
+const (
+	// SdkBetaContext1M enables extended context window.
+	SdkBetaContext1M SdkBeta = "context-1m-2025-08-07"
+)
+
 // SystemPromptPreset represents a preset system prompt configuration.
 type SystemPromptPreset struct {
 	Type   string  `json:"type"`   // "preset"
 	Preset string  `json:"preset"` // "claude_code"
 	Append *string `json:"append,omitempty"`
+}
+
+// ToolsPreset represents a preset tool configuration.
+type ToolsPreset struct {
+	Type   string `json:"type"`   // "preset"
+	Preset string `json:"preset"` // "claude_code"
 }
 
 // AgentDefinition represents a custom agent definition.
@@ -82,6 +96,10 @@ type StderrCallbackFunc func(line string)
 
 // ClaudeAgentOptions represents configuration options for the Claude SDK.
 type ClaudeAgentOptions struct {
+	// Base tool configuration (set of tools available to Claude).
+	// Supports []string or ToolsPreset. An empty slice disables all built-in tools.
+	Tools interface{} `json:"tools,omitempty"`
+
 	// Tool configuration
 	AllowedTools    []string `json:"allowed_tools,omitempty"`
 	DisallowedTools []string `json:"disallowed_tools,omitempty"`
@@ -112,11 +130,12 @@ type ClaudeAgentOptions struct {
 	ForkSession          bool    `json:"fork_session,omitempty"`
 
 	// Model and execution limits
-	Model          *string  `json:"model,omitempty"`
-	FallbackModel  *string  `json:"fallback_model,omitempty"` // Fallback model if primary model is unavailable
-	MaxTurns       *int     `json:"max_turns,omitempty"`
-	MaxThinkingTokens *int  `json:"max_thinking_tokens,omitempty"` // Maximum tokens for extended thinking
-	MaxBudgetUSD      *float64 `json:"max_budget_usd,omitempty"`      // Maximum budget in USD for this query
+	Model             *string   `json:"model,omitempty"`
+	FallbackModel     *string   `json:"fallback_model,omitempty"` // Fallback model if primary model is unavailable
+	MaxTurns          *int      `json:"max_turns,omitempty"`
+	MaxThinkingTokens *int      `json:"max_thinking_tokens,omitempty"` // Maximum tokens for extended thinking
+	MaxBudgetUSD      *float64  `json:"max_budget_usd,omitempty"`      // Maximum budget in USD for this query
+	Betas             []SdkBeta `json:"betas,omitempty"`               // Beta feature flags
 
 	// API configuration
 	BaseURL *string `json:"base_url,omitempty"` // Custom Anthropic API base URL (ANTHROPIC_BASE_URL)
@@ -135,11 +154,14 @@ type ClaudeAgentOptions struct {
 	ExtraArgs map[string]*string `json:"extra_args,omitempty"` // Pass arbitrary CLI flags
 
 	// Buffer configuration
-	MaxBufferSize *int `json:"max_buffer_size,omitempty"` // Max bytes when buffering CLI stdout
+	MaxBufferSize          *int `json:"max_buffer_size,omitempty"`          // Max bytes when buffering CLI stdout
 	MessageChannelCapacity *int `json:"message_channel_capacity,omitempty"` // Capacity for message channels
 
 	// Streaming configuration
 	IncludePartialMessages bool `json:"include_partial_messages,omitempty"`
+
+	// Output format for structured outputs (e.g., JSON schema)
+	OutputFormat map[string]interface{} `json:"output_format,omitempty"`
 
 	// User identifier
 	User *string `json:"user,omitempty"`
@@ -149,6 +171,9 @@ type ClaudeAgentOptions struct {
 
 	// Plugin configurations
 	Plugins []SdkPluginConfig `json:"plugins,omitempty"`
+
+	// File checkpointing
+	EnableFileCheckpointing bool `json:"enable_file_checkpointing,omitempty"`
 
 	// Debug and diagnostics
 	Verbose bool `json:"-"` // Enable verbose debug logging
@@ -175,6 +200,19 @@ func NewClaudeAgentOptions() *ClaudeAgentOptions {
 // WithAllowedTools sets the allowed tools.
 func (o *ClaudeAgentOptions) WithAllowedTools(tools ...string) *ClaudeAgentOptions {
 	o.AllowedTools = tools
+	return o
+}
+
+// WithTools sets the base tool set available to Claude (overrides default preset).
+// Pass an empty slice to disable all built-in tools.
+func (o *ClaudeAgentOptions) WithTools(tools ...string) *ClaudeAgentOptions {
+	o.Tools = tools
+	return o
+}
+
+// WithToolsPreset sets a preset tool configuration (e.g., claude_code).
+func (o *ClaudeAgentOptions) WithToolsPreset(preset ToolsPreset) *ClaudeAgentOptions {
+	o.Tools = preset
 	return o
 }
 
@@ -241,6 +279,12 @@ func (o *ClaudeAgentOptions) WithForkSession(fork bool) *ClaudeAgentOptions {
 // WithModel sets the model to use.
 func (o *ClaudeAgentOptions) WithModel(model string) *ClaudeAgentOptions {
 	o.Model = &model
+	return o
+}
+
+// WithBetas enables Anthropic API beta features.
+func (o *ClaudeAgentOptions) WithBetas(betas ...SdkBeta) *ClaudeAgentOptions {
+	o.Betas = betas
 	return o
 }
 
@@ -339,6 +383,21 @@ func (o *ClaudeAgentOptions) WithExtraArg(key string, value *string) *ClaudeAgen
 // WithMaxBufferSize sets the maximum buffer size.
 func (o *ClaudeAgentOptions) WithMaxBufferSize(size int) *ClaudeAgentOptions {
 	o.MaxBufferSize = &size
+	return o
+}
+
+// WithOutputFormat sets the output format for structured outputs.
+func (o *ClaudeAgentOptions) WithOutputFormat(format map[string]interface{}) *ClaudeAgentOptions {
+	o.OutputFormat = format
+	return o
+}
+
+// WithJSONSchemaOutput sets output_format to a JSON schema for structured outputs.
+func (o *ClaudeAgentOptions) WithJSONSchemaOutput(schema interface{}) *ClaudeAgentOptions {
+	o.OutputFormat = map[string]interface{}{
+		"type":   "json_schema",
+		"schema": schema,
+	}
 	return o
 }
 
@@ -447,5 +506,11 @@ func (o *ClaudeAgentOptions) WithLocalPlugin(path string) *ClaudeAgentOptions {
 		Path: path,
 	}
 	o.Plugins = append(o.Plugins, plugin)
+	return o
+}
+
+// WithEnableFileCheckpointing toggles file checkpointing support.
+func (o *ClaudeAgentOptions) WithEnableFileCheckpointing(enabled bool) *ClaudeAgentOptions {
+	o.EnableFileCheckpointing = enabled
 	return o
 }

@@ -23,6 +23,18 @@ type ContentBlock interface {
 	isContentBlock()
 }
 
+// AssistantMessageError represents known assistant error codes.
+type AssistantMessageError string
+
+const (
+	AssistantMessageErrorAuthenticationFailed AssistantMessageError = "authentication_failed"
+	AssistantMessageErrorBilling              AssistantMessageError = "billing_error"
+	AssistantMessageErrorRateLimit            AssistantMessageError = "rate_limit"
+	AssistantMessageErrorInvalidRequest       AssistantMessageError = "invalid_request"
+	AssistantMessageErrorServer               AssistantMessageError = "server_error"
+	AssistantMessageErrorUnknown              AssistantMessageError = "unknown"
+)
+
 // TextBlock represents a text content block from Claude.
 type TextBlock struct {
 	Type string `json:"type"`
@@ -182,6 +194,7 @@ type UserMessage struct {
 	Type            string      `json:"type"`
 	Content         interface{} `json:"content"` // Can be string or []ContentBlock
 	ParentToolUseID *string     `json:"parent_tool_use_id,omitempty"`
+	UUID            *string     `json:"uuid,omitempty"`
 }
 
 // GetMessageType returns the type of the message.
@@ -226,6 +239,7 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 		Content json.RawMessage            `json:"content"`
 		Message map[string]json.RawMessage `json:"message"` // Handle nested message format from CLI
+		UUID    *string                    `json:"uuid"`
 		*Alias
 	}{
 		Alias: (*Alias)(m),
@@ -233,6 +247,11 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+
+	// Capture UUID from top-level
+	if aux.UUID != nil {
+		m.UUID = aux.UUID
 	}
 
 	var contentRaw json.RawMessage
@@ -247,6 +266,13 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 			var id string
 			if err := json.Unmarshal(parentToolUseID, &id); err == nil {
 				m.ParentToolUseID = &id
+			}
+		}
+		// Extract uuid from nested message if present
+		if uuidRaw, ok := aux.Message["uuid"]; ok {
+			var id string
+			if err := json.Unmarshal(uuidRaw, &id); err == nil {
+				m.UUID = &id
 			}
 		}
 	}
@@ -288,10 +314,11 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 
 // AssistantMessage represents a message from Claude assistant.
 type AssistantMessage struct {
-	Type            string         `json:"type"`
-	Content         []ContentBlock `json:"content"`
-	Model           string         `json:"model"`
-	ParentToolUseID *string        `json:"parent_tool_use_id,omitempty"`
+	Type            string                 `json:"type"`
+	Content         []ContentBlock         `json:"content"`
+	Model           string                 `json:"model"`
+	ParentToolUseID *string                `json:"parent_tool_use_id,omitempty"`
+	Error           *AssistantMessageError `json:"error,omitempty"`
 }
 
 // GetMessageType returns the type of the message.
@@ -336,6 +363,14 @@ func (m *AssistantMessage) UnmarshalJSON(data []byte) error {
 			var model string
 			if err := json.Unmarshal(modelRaw, &model); err == nil {
 				m.Model = model
+			}
+		}
+		// Extract error field for rate limit/other errors
+		if errRaw, ok := aux.Message["error"]; ok {
+			var errCode string
+			if err := json.Unmarshal(errRaw, &errCode); err == nil && errCode != "" {
+				code := AssistantMessageError(errCode)
+				m.Error = &code
 			}
 		}
 	}
@@ -418,16 +453,17 @@ func (m *SystemMessage) ShouldDisplayToUser() bool {
 
 // ResultMessage represents a result message with cost and usage information.
 type ResultMessage struct {
-	Type          string                 `json:"type"`
-	Subtype       string                 `json:"subtype"`
-	DurationMs    int                    `json:"duration_ms"`
-	DurationAPIMs int                    `json:"duration_api_ms"`
-	IsError       bool                   `json:"is_error"`
-	NumTurns      int                    `json:"num_turns"`
-	SessionID     string                 `json:"session_id"`
-	TotalCostUSD  *float64               `json:"total_cost_usd,omitempty"`
-	Usage         map[string]interface{} `json:"usage,omitempty"`
-	Result        *string                `json:"result,omitempty"`
+	Type             string                 `json:"type"`
+	Subtype          string                 `json:"subtype"`
+	DurationMs       int                    `json:"duration_ms"`
+	DurationAPIMs    int                    `json:"duration_api_ms"`
+	IsError          bool                   `json:"is_error"`
+	NumTurns         int                    `json:"num_turns"`
+	SessionID        string                 `json:"session_id"`
+	TotalCostUSD     *float64               `json:"total_cost_usd,omitempty"`
+	Usage            map[string]interface{} `json:"usage,omitempty"`
+	Result           *string                `json:"result,omitempty"`
+	StructuredOutput interface{}            `json:"structured_output,omitempty"`
 }
 
 // GetMessageType returns the type of the message.
