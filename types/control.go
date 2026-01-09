@@ -74,9 +74,15 @@ const (
 	HookEventPreToolUse       HookEvent = "PreToolUse"
 	HookEventPostToolUse      HookEvent = "PostToolUse"
 	HookEventUserPromptSubmit HookEvent = "UserPromptSubmit"
+	HookEventPrePrompt        HookEvent = "PrePrompt"
+	HookEventPostPrompt       HookEvent = "PostPrompt"
+	HookEventPreResponse      HookEvent = "PreResponse"
+	HookEventPostResponse     HookEvent = "PostResponse"
 	HookEventStop             HookEvent = "Stop"
 	HookEventSubagentStop     HookEvent = "SubagentStop"
 	HookEventPreCompact       HookEvent = "PreCompact"
+	HookEventPostCompact      HookEvent = "PostCompact"
+	HookEventOnError          HookEvent = "OnError"
 )
 
 // BaseHookInput contains common fields for all hook inputs.
@@ -133,6 +139,53 @@ type PreCompactHookInput struct {
 	CustomInstructions *string `json:"custom_instructions,omitempty"`
 }
 
+// PostCompactHookInput represents input for PostCompact hook events.
+type PostCompactHookInput struct {
+	BaseHookInput
+	HookEventName    string  `json:"hook_event_name"` // "PostCompact"
+	CompactedTokens  int     `json:"compacted_tokens"`
+	OriginalTokens   int     `json:"original_tokens"`
+	CompressionRatio float64 `json:"compression_ratio"`
+}
+
+// PrePromptHookInput represents input for PrePrompt hook events.
+type PrePromptHookInput struct {
+	BaseHookInput
+	HookEventName string                   `json:"hook_event_name"` // "PrePrompt"
+	Messages      []map[string]interface{} `json:"messages"`
+}
+
+// PostPromptHookInput represents input for PostPrompt hook events.
+type PostPromptHookInput struct {
+	BaseHookInput
+	HookEventName string                   `json:"hook_event_name"` // "PostPrompt"
+	Messages      []map[string]interface{} `json:"messages"`
+	Response      map[string]interface{}   `json:"response"`
+}
+
+// PreResponseHookInput represents input for PreResponse hook events.
+type PreResponseHookInput struct {
+	BaseHookInput
+	HookEventName string                 `json:"hook_event_name"` // "PreResponse"
+	Response      map[string]interface{} `json:"response"`
+}
+
+// PostResponseHookInput represents input for PostResponse hook events.
+type PostResponseHookInput struct {
+	BaseHookInput
+	HookEventName string                 `json:"hook_event_name"` // "PostResponse"
+	Response      map[string]interface{} `json:"response"`
+}
+
+// OnErrorHookInput represents input for OnError hook events.
+type OnErrorHookInput struct {
+	BaseHookInput
+	HookEventName string                 `json:"hook_event_name"` // "OnError"
+	Error         string                 `json:"error"`
+	ErrorType     string                 `json:"error_type"`
+	Context       map[string]interface{} `json:"context,omitempty"`
+}
+
 // HookSpecificOutput is an interface for all hook-specific outputs.
 type HookSpecificOutput interface {
 	GetHookEventName() string
@@ -170,6 +223,74 @@ type UserPromptSubmitHookSpecificOutput struct {
 
 // GetHookEventName returns the hook event name.
 func (h *UserPromptSubmitHookSpecificOutput) GetHookEventName() string {
+	return h.HookEventName
+}
+
+// PrePromptHookSpecificOutput represents hook-specific output for PrePrompt events.
+type PrePromptHookSpecificOutput struct {
+	HookEventName     string                    `json:"hookEventName"` // "PrePrompt"
+	ModifiedMessages  *[]map[string]interface{} `json:"modifiedMessages,omitempty"`
+	AdditionalContext *string                   `json:"additionalContext,omitempty"`
+}
+
+// GetHookEventName returns the hook event name.
+func (h *PrePromptHookSpecificOutput) GetHookEventName() string {
+	return h.HookEventName
+}
+
+// PostPromptHookSpecificOutput represents hook-specific output for PostPrompt events.
+type PostPromptHookSpecificOutput struct {
+	HookEventName     string  `json:"hookEventName"` // "PostPrompt"
+	AdditionalContext *string `json:"additionalContext,omitempty"`
+}
+
+// GetHookEventName returns the hook event name.
+func (h *PostPromptHookSpecificOutput) GetHookEventName() string {
+	return h.HookEventName
+}
+
+// PreResponseHookSpecificOutput represents hook-specific output for PreResponse events.
+type PreResponseHookSpecificOutput struct {
+	HookEventName    string                  `json:"hookEventName"` // "PreResponse"
+	ModifiedResponse *map[string]interface{} `json:"modifiedResponse,omitempty"`
+}
+
+// GetHookEventName returns the hook event name.
+func (h *PreResponseHookSpecificOutput) GetHookEventName() string {
+	return h.HookEventName
+}
+
+// PostResponseHookSpecificOutput represents hook-specific output for PostResponse events.
+type PostResponseHookSpecificOutput struct {
+	HookEventName     string  `json:"hookEventName"` // "PostResponse"
+	AdditionalContext *string `json:"additionalContext,omitempty"`
+}
+
+// GetHookEventName returns the hook event name.
+func (h *PostResponseHookSpecificOutput) GetHookEventName() string {
+	return h.HookEventName
+}
+
+// PostCompactHookSpecificOutput represents hook-specific output for PostCompact events.
+type PostCompactHookSpecificOutput struct {
+	HookEventName     string  `json:"hookEventName"` // "PostCompact"
+	AdditionalContext *string `json:"additionalContext,omitempty"`
+}
+
+// GetHookEventName returns the hook event name.
+func (h *PostCompactHookSpecificOutput) GetHookEventName() string {
+	return h.HookEventName
+}
+
+// OnErrorHookSpecificOutput represents hook-specific output for OnError events.
+type OnErrorHookSpecificOutput struct {
+	HookEventName     string  `json:"hookEventName"`            // "OnError"
+	RecoveryAction    *string `json:"recoveryAction,omitempty"` // "retry", "skip", "abort"
+	AdditionalContext *string `json:"additionalContext,omitempty"`
+}
+
+// GetHookEventName returns the hook event name.
+func (h *OnErrorHookSpecificOutput) GetHookEventName() string {
 	return h.HookEventName
 }
 

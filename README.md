@@ -1,6 +1,26 @@
 # Claude Agent SDK for Go
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/M1n9X/claude-agent-sdk-go.svg)](https://pkg.go.dev/github.com/M1n9X/claude-agent-sdk-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/M1n9X/claude-agent-sdk-go)](https://goreportcard.com/report/github.com/M1n9X/claude-agent-sdk-go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python SDK Parity](https://img.shields.io/badge/Python%20SDK%20Parity-100%25-brightgreen)](docs/python-sdk-alignment.md)
+
 A Go SDK for interacting with Claude Code CLI, providing a robust interface for building AI-powered applications using Anthropic's Claude models.
+
+## 🎯 100% Python SDK Feature Parity
+
+This Go SDK achieves **complete feature parity** with the [official Python SDK](https://github.com/anthropics/claude-agent-sdk-python), implementing all 204 features including:
+
+- ✅ All 12 hook events (PreToolUse, PostToolUse, PrePrompt, PostPrompt, PreResponse, PostResponse, PreCompact, PostCompact, OnError, Stop, SubagentStop, UserPromptSubmit)
+- ✅ Python `@tool` decorator-style API with `SimpleTool`, `Tool()`, and `QuickTool()`
+- ✅ Complete MCP server support (stdio, SSE, HTTP, SDK)
+- ✅ All permission modes and callbacks
+- ✅ File checkpointing and rewind
+- ✅ Structured outputs with JSON schema
+- ✅ All message types and content blocks
+- ✅ Complete error handling with type guards
+
+See [Python SDK Alignment Guide](docs/python-sdk-alignment.md) for detailed comparison and migration guide.
 
 ## Overview
 
@@ -186,20 +206,43 @@ opts := types.NewClaudeAgentOptions().
 
 ### Hook System
 
-React to various events in the Claude lifecycle:
+React to various events in the Claude lifecycle. The SDK supports all hook events from the Python SDK:
+
+**Available Hook Events:**
+- `HookEventPreToolUse` - Before tool execution
+- `HookEventPostToolUse` - After tool execution
+- `HookEventUserPromptSubmit` - When user submits a prompt
+- `HookEventPrePrompt` - Before sending messages to model
+- `HookEventPostPrompt` - After receiving response from model
+- `HookEventPreResponse` - Before sending response to user
+- `HookEventPostResponse` - After sending response to user
+- `HookEventPreCompact` - Before context compaction
+- `HookEventPostCompact` - After context compaction
+- `HookEventOnError` - When an error occurs
+- `HookEventStop` - When the agent stops
+- `HookEventSubagentStop` - When a subagent stops
 
 ```go
 opts := types.NewClaudeAgentOptions().
     WithHook(types.HookEventPreToolUse, types.HookMatcher{
         Hooks: []types.HookCallbackFunc{
             func(ctx context.Context, input interface{}, toolUseID *string, hookCtx types.HookContext) (interface{}, error) {
-                preToolInput := input.(*types.PreToolUseHookInput)
-                log.Printf("Tool %s about to execute", preToolInput.ToolName)
+                log.Printf("Tool about to execute")
+                return &types.SyncHookJSONOutput{}, nil
+            },
+        },
+    }).
+    WithHook(types.HookEventPostToolUse, types.HookMatcher{
+        Hooks: []types.HookCallbackFunc{
+            func(ctx context.Context, input interface{}, toolUseID *string, hookCtx types.HookContext) (interface{}, error) {
+                log.Printf("Tool execution completed")
                 return &types.SyncHookJSONOutput{}, nil
             },
         },
     })
 ```
+
+See [examples/hooks/comprehensive_hooks](examples/hooks/comprehensive_hooks/main.go) for a complete example of all hook events.
 
 ### MCP Server Integration
 
@@ -217,6 +260,69 @@ mcpServers := map[string]interface{}{
 opts := types.NewClaudeAgentOptions().
     WithMcpServers(mcpServers)
 ```
+
+### Custom Tools (SDK MCP Servers)
+
+Create custom tools that run in-process, similar to Python's `@tool` decorator:
+
+**Method 1: SimpleTool (most similar to Python's @tool)**
+```go
+greetTool := types.SimpleTool{
+    Name:        "greet",
+    Description: "Greet a user by name",
+    Parameters: map[string]types.SimpleParam{
+        "name": {Type: "string", Description: "User's name", Required: true},
+    },
+    Handler: func(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+        name := args["name"].(string)
+        return types.NewMcpToolResult(
+            types.TextBlock{Type: "text", Text: fmt.Sprintf("Hello, %s!", name)},
+        ), nil
+    },
+}
+
+tool, _ := greetTool.Build()
+```
+
+**Method 2: Fluent API**
+```go
+tool, _ := types.Tool("greet", "Greet a user").
+    Param("name", "string", "User's name", true).
+    Handle(func(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+        name := args["name"].(string)
+        return types.NewMcpToolResult(
+            types.TextBlock{Type: "text", Text: fmt.Sprintf("Hello, %s!", name)},
+        ), nil
+    })
+```
+
+**Method 3: QuickTool (ultra-concise)**
+```go
+tool, _ := types.QuickTool("greet", "Greet a user",
+    map[string]string{"name": "string"},
+    func(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+        name := args["name"].(string)
+        return types.NewMcpToolResult(
+            types.TextBlock{Type: "text", Text: fmt.Sprintf("Hello, %s!", name)},
+        ), nil
+    },
+)
+```
+
+**Using Custom Tools:**
+```go
+// Create SDK MCP server
+server := types.CreateToolServer("my-tools", "1.0.0", []types.McpTool{tool})
+
+// Use with Claude
+opts := types.NewClaudeAgentOptions().
+    WithMcpServers(map[string]interface{}{"tools": server}).
+    WithAllowedTools("mcp__tools__greet")
+
+messages, _ := claude.Query(ctx, "Greet Alice", opts)
+```
+
+See [examples/mcp/decorator_style_tools](examples/mcp/decorator_style_tools/main.go) for complete examples.
 
 ## Error Handling
 
@@ -243,7 +349,203 @@ if err != nil {
 }
 ```
 
-## Advanced Configuration
+## Thread Safety & Concurrency
+
+### Design Philosophy: Intentionally Not Thread-Safe
+
+The `Client` type is **intentionally not thread-safe**. This is a deliberate design choice, not a bug or oversight.
+
+#### Why This Design is Better
+
+**1. Session Semantics**
+- Each `Client` represents a single conversational session with Claude
+- Sessions are inherently sequential: ask → wait → respond → ask again
+- Concurrent access to the same session violates this natural conversation flow
+- Example: You don't have two people simultaneously talking in the same conversation
+
+**2. Performance**
+- No mutex overhead for the 99% case (single-goroutine usage)
+- Zero synchronization cost when not needed
+- Faster execution for typical use cases
+
+**3. Clear Ownership**
+- Forces explicit ownership: each goroutine owns its Client
+- Prevents subtle bugs from shared mutable state
+- Makes code easier to reason about
+
+**4. Python SDK Alignment**
+- Matches Python SDK's `ClaudeSDKClient` design (also not thread-safe)
+- Ensures consistent behavior across language implementations
+- Familiar pattern for users migrating from Python
+
+**5. State Management**
+- Client maintains stateful connection and session history
+- Concurrent access would require complex state synchronization
+- Adds unnecessary complexity for rare use cases
+
+### When NOT to Share a Client (Most Cases)
+
+```go
+// ✅ CORRECT: Independent tasks - use separate Clients
+var wg sync.WaitGroup
+for i := 0; i < 10; i++ {
+    wg.Add(1)
+    go func(id int) {
+        defer wg.Done()
+        
+        // Each goroutine owns its Client
+        client, _ := claude.NewClient(ctx, opts)
+        defer client.Close(ctx)
+        
+        client.Connect(ctx)
+        client.Query(ctx, fmt.Sprintf("Task %d", id))
+        for msg := range client.ReceiveResponse(ctx) {
+            // Process independently
+        }
+    }(i)
+}
+wg.Wait()
+```
+
+**Use separate Clients when:**
+- ✅ Processing independent tasks
+- ✅ Parallel batch operations
+- ✅ Different conversation contexts
+- ✅ Worker pool pattern
+- ✅ Request-per-goroutine pattern
+
+### When Sharing Makes Sense (Rare Cases)
+
+```go
+// ✅ CORRECT: Shared session - use ConcurrentClient with serialized responses
+client, _ := claude.NewConcurrentClient(ctx, opts)
+defer client.Close(ctx)
+
+client.Connect(ctx)
+
+// Producers enqueue work; a single worker drains to avoid interleaved responses.
+tasks := make(chan int, 10)
+
+go func() {
+    defer close(tasks)
+    for i := 0; i < 10; i++ {
+        tasks <- i
+    }
+}()
+
+for taskID := range tasks {
+    messages, err := client.QueryAndReceive(ctx, fmt.Sprintf("Task %d", taskID))
+    if err != nil {
+        log.Printf("Task %d failed: %v", taskID, err)
+        continue
+    }
+    for msg := range messages {
+        // Handle response for this task
+    }
+}
+```
+
+**Use ConcurrentClient when:**
+- ⚠️ Multiple goroutines need to interact with the **same conversation session**
+- ⚠️ Shared session state is required (very rare)
+- ⚠️ Connection reuse is critical (very rare)
+
+**Note:** Operations are serialized (one at a time), so there's no parallelism benefit.
+
+### Recommended Pattern: One Client per Goroutine
+
+This is the **recommended pattern** for 99% of use cases:
+
+```go
+// ✅ BEST PRACTICE
+func processTask(ctx context.Context, task string, opts *types.ClaudeAgentOptions) error {
+    // Each function call creates its own Client
+    client, err := claude.NewClient(ctx, opts)
+    if err != nil {
+        return err
+    }
+    defer client.Close(ctx)
+    
+    if err := client.Connect(ctx); err != nil {
+        return err
+    }
+    
+    if err := client.Query(ctx, task); err != nil {
+        return err
+    }
+    
+    for msg := range client.ReceiveResponse(ctx) {
+        // Process messages
+    }
+    
+    return nil
+}
+
+// Launch concurrent tasks
+var wg sync.WaitGroup
+for _, task := range tasks {
+    wg.Add(1)
+    go func(t string) {
+        defer wg.Done()
+        processTask(ctx, t, opts)
+    }(task)
+}
+wg.Wait()
+```
+
+**Benefits:**
+- ✅ No synchronization overhead
+- ✅ Clear ownership semantics
+- ✅ Best performance
+- ✅ Idiomatic Go
+- ✅ No race conditions possible
+
+### Query Function (Naturally Concurrent-Safe)
+
+The `Query()` function is naturally concurrent-safe since each call creates its own connection:
+
+```go
+// ✅ SAFE: Each call is independent
+var wg sync.WaitGroup
+for i := 0; i < 10; i++ {
+    wg.Add(1)
+    go func(id int) {
+        defer wg.Done()
+        messages, _ := claude.Query(ctx, fmt.Sprintf("Task %d", id), opts)
+        for msg := range messages {
+            // Process messages
+        }
+    }(i)
+}
+wg.Wait()
+```
+
+**Use Query() when:**
+- ✅ One-shot queries without session state
+- ✅ Stateless operations
+- ✅ Simple concurrent tasks
+
+### Comparison
+
+| Pattern | Thread-Safe | Performance | Use Case | Recommendation |
+|---------|-------------|-------------|----------|----------------|
+| One Client per Goroutine | ✅ (isolated) | ⭐⭐⭐⭐⭐ | Independent tasks | ✅ **Recommended** |
+| ConcurrentClient | ✅ (synchronized) | ⭐⭐⭐ | Shared session | ⚠️ Rare cases only |
+| Query Function | ✅ (isolated) | ⭐⭐⭐⭐ | One-shot queries | ✅ **Recommended** |
+
+### Summary
+
+**The "not thread-safe" design is intentional and optimal because:**
+
+1. **Sessions are sequential by nature** - conversations don't happen in parallel
+2. **Performance** - no synchronization overhead for the common case
+3. **Simplicity** - clear ownership, no shared state bugs
+4. **Alignment** - matches Python SDK and user expectations
+5. **Go idioms** - each goroutine owns its resources
+
+**Default recommendation:** Create one Client per goroutine. This is the most efficient, safest, and most idiomatic approach.
+
+See [Concurrency Guide](docs/concurrency-guide.md) and [examples/advanced/concurrent_usage](examples/advanced/concurrent_usage/main.go) for detailed patterns and examples.
 
 ### Session Management
 
@@ -301,12 +603,56 @@ Content blocks include:
 
 Check out the [examples directory](examples/) for detailed usage examples:
 
-- [Agent examples](examples/advanced/agents/main.go) - Using custom agents with specific tools and prompts
-- Additional examples coming soon
+### Basic Examples
+- [Quick Start](examples/basic/quick_start/main.go) - Minimal example to get started
+- [Simple Query](examples/basic/simple_query/main.go) - One-shot query example
+- [Interactive Client](examples/basic/interactive_client/main.go) - Multi-turn conversation
 
-## Contributing
+### Configuration Examples
+- [System Prompt](examples/configuration/system_prompt/main.go) - Custom system prompts
+- [Max Budget USD](examples/configuration/max_budget_usd/main.go) - Budget limits
+- [Setting Sources](examples/configuration/setting_sources/main.go) - Configuration sources
+- [Type Safe Accessors](examples/configuration/type_safe_accessors/main.go) - Type-safe message handling
+- [Configurable Channels](examples/configuration/configurable_channels/main.go) - Channel capacity configuration
 
-Contributions are welcome! Please open an issue or submit a pull request for bug fixes or new features.
+### MCP Examples
+- [MCP Calculator](examples/mcp/mcp_calculator/main.go) - SDK MCP server with calculator tools
+- [Decorator Style Tools](examples/mcp/decorator_style_tools/main.go) - Python @tool decorator-style API
+
+### Hook Examples
+- [With Hooks](examples/hooks/with_hooks/main.go) - Basic hook usage
+- [Comprehensive Hooks](examples/hooks/comprehensive_hooks/main.go) - All 12 hook events
+
+### Permission Examples
+- [With Permissions](examples/permissions/with_permissions/main.go) - Permission modes
+- [Tool Permission Callback](examples/permissions/tool_permission_callback/main.go) - Custom permission logic
+
+### Streaming Examples
+- [Streaming Mode](examples/streaming/streaming_mode/main.go) - Basic streaming
+- [Streaming Conversation](examples/streaming/streaming_mode_conversation/main.go) - Multi-turn streaming
+- [Streaming Comprehensive](examples/streaming/streaming_mode_comprehensive/main.go) - Advanced streaming
+
+### Utility Examples
+- [Include Partial Messages](examples/utilities/include_partial_messages/main.go) - Partial message updates
+- [Stderr Callback](examples/utilities/stderr_callback/main.go) - CLI stderr handling
+
+### Advanced Examples
+- [Agents](examples/advanced/agents/main.go) - Custom agent definitions
+- [Plugin Example](examples/advanced/plugin_example/main.go) - Plugin system
+- [Python Equivalence](examples/python_equivalence/main.go) - Python SDK API comparison
+
+## Documentation
+
+- [README.md](README.md) - Main documentation and quick start
+- [Python SDK Alignment](docs/python-sdk-alignment.md) - Complete feature comparison and migration guide
+- [Feature Checklist](docs/feature-checklist.md) - All 204 features implementation status
+- [Quick Reference](docs/quick-reference.md) - Quick lookup for common operations
+- [Concurrency Guide](docs/concurrency-guide.md) - Detailed concurrency patterns and best practices
+- [Design Decisions](docs/design-decisions.md) - Architectural decisions and rationale
+- [Architecture](docs/architecture.md) - System architecture overview
+- [Testing Strategy](docs/testing-strategy.md) - Testing approach and coverage
+- [Changelog](docs/CHANGELOG.md) - Release history and notable changes
+- [Contributing](docs/contributing.md) - How to contribute to the project
 
 ## License
 
